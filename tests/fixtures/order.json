@@ -1,0 +1,35 @@
+{
+  "id": "ord_98765",
+  "orderNumber": "CHC-2026-0001",
+  "status": "complete",
+  "createdAt": "2026-08-01T10:30:00+12:00",
+  "updatedAt": "2026-08-01T10:31:00+12:00",
+  "currency": "NZD",
+  "total": 450.0,
+  "quantity": 3,
+  "buyer": {
+    "firstName": "Alex",
+    "lastName": "Organiser",
+    "email": "alex@example.com",
+    "phone": "+64 21 000 0000"
+  },
+  "ticketTypes": [
+    {
+      "ticketTypeId": "tt_1",
+      "ticketTypeName": "General Admission",
+      "quantity": 2,
+      "unitPrice": 150.0,
+      "totalPrice": 300.0
+    },
+    {
+      "ticketTypeId": "tt_2",
+      "ticketTypeName": "Workshop",
+      "quantity": 1,
+      "unitPrice": 150.0,
+      "totalPrice": 150.0
+    }
+  ],
+  "paymentProcessorId": "pi_secret",
+  "paymentMethod": "card",
+  "internalNotes": "do not surface"
+}

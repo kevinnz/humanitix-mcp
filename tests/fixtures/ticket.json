@@ -1,0 +1,30 @@
+{
+  "id": "tkt_11111",
+  "ticketTypeId": "tt_1",
+  "ticketTypeName": "General Admission",
+  "status": "complete",
+  "checkedIn": false,
+  "checkInTime": null,
+  "attendee": {
+    "firstName": "Sam",
+    "lastName": "Attendee",
+    "email": "sam@example.com"
+  },
+  "order": {
+    "id": "ord_98765",
+    "orderNumber": "CHC-2026-0001"
+  },
+  "eventDateId": "ed_111",
+  "additionalAnswers": [
+    {
+      "question": "Dietary requirements",
+      "answer": "Vegetarian"
+    },
+    {
+      "question": "T-shirt size",
+      "answer": "L"
+    }
+  ],
+  "barcode": "secret-barcode",
+  "internalField": "ignored"
+}

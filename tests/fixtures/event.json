@@ -1,0 +1,38 @@
+{
+  "id": "evt_12345",
+  "name": "CHCon 2026",
+  "slug": "chcon-2026",
+  "description": "A cyber security conference.",
+  "startDate": "2026-11-18T09:00:00+13:00",
+  "endDate": "2026-11-20T17:00:00+13:00",
+  "timezone": "Pacific/Auckland",
+  "published": true,
+  "status": "published",
+  "location": {
+    "venue": {
+      "name": "Christchurch Town Hall",
+      "address": "86 Kilmore Street",
+      "city": "Christchurch",
+      "country": "New Zealand"
+    },
+    "latitude": -43.5309,
+    "longitude": 172.6375
+  },
+  "eventDates": [
+    {
+      "id": "ed_111",
+      "name": "Day 1",
+      "startDate": "2026-11-18T09:00:00+13:00",
+      "endDate": "2026-11-18T17:00:00+13:00",
+      "doorTime": "2026-11-18T08:00:00+13:00"
+    },
+    {
+      "id": "ed_222",
+      "name": "Day 2",
+      "startDate": "2026-11-19T09:00:00+13:00",
+      "endDate": "2026-11-19T17:00:00+13:00",
+      "doorTime": "2026-11-19T08:00:00+13:00"
+    }
+  ],
+  "internalField": "should be ignored"
+}

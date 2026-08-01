@@ -1,0 +1,19 @@
+{
+  "totalCheckedIn": 42,
+  "totalSold": 300,
+  "byTicketType": [
+    {
+      "ticketTypeId": "tt_1",
+      "ticketTypeName": "General Admission",
+      "checkedIn": 30,
+      "sold": 200
+    },
+    {
+      "ticketTypeId": "tt_2",
+      "ticketTypeName": "Workshop",
+      "checkedIn": 12,
+      "sold": 100
+    }
+  ],
+  "betaField": "may change"
+}
