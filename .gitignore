@@ -216,3 +216,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Raw API fixtures captured during local development
+tests/fixtures/*-raw.json
+
+.plan/
