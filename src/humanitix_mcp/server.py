@@ -11,9 +11,10 @@ import json
 import os
 from collections import defaultdict
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, AsyncIterator
 
+from dotenv import load_dotenv
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import CallToolResult, TextContent, Tool
@@ -46,19 +47,64 @@ from humanitix_mcp.models import (
 DEFAULT_PAGE_SIZE = 100
 DEFAULT_MAX_ITEMS = 500
 MAX_PAGE_SIZE = 100
+DOTENV_PATH_ENV = "HUMANITIX_DOTENV_PATH"
 
 
 class _ValidationFailure(HumanitixError):
     """Raised when tool arguments fail server-side validation."""
 
 
+def _default_dotenv_path() -> Path | None:
+    """Find a local dotenv file without requiring the process cwd to be the repo."""
+    for directory in (Path.cwd(), *Path.cwd().parents):
+        candidate = directory / ".env"
+        if candidate.is_file():
+            return candidate
+
+    source_candidate = Path(__file__).resolve().parents[2] / ".env"
+    if source_candidate.is_file():
+        return source_candidate
+    return None
+
+
+def load_server_config() -> None:
+    """Load dotenv configuration while preserving explicit process environment."""
+    configured_path = os.environ.get(DOTENV_PATH_ENV)
+    if configured_path is not None:
+        dotenv_path = Path(configured_path).expanduser()
+        if not dotenv_path.is_absolute():
+            dotenv_path = Path.cwd() / dotenv_path
+    else:
+        dotenv_path = _default_dotenv_path()
+
+    if dotenv_path is not None:
+        load_dotenv(dotenv_path=dotenv_path, override=False)
+
+
+class _ConnectionClient:
+    """Lazily create and retain the client for one MCP connection."""
+
+    def __init__(self) -> None:
+        self._client: HumanitixClient | None = None
+
+    def get(self) -> HumanitixClient:
+        if self._client is None:
+            self._client = HumanitixClient(
+                api_key=os.environ.get("HUMANITIX_API_KEY") or None,
+                base_url=os.environ.get("HUMANITIX_BASE_URL") or None,
+            )
+        return self._client
+
+    async def close(self) -> None:
+        if self._client is not None:
+            await self._client.close()
+
+
 @asynccontextmanager
 async def app_lifespan(server: Server) -> AsyncIterator[dict[str, Any]]:
-    """Create one HumanitixClient for the lifetime of the stdio connection."""
-    client = HumanitixClient(
-        api_key=os.environ.get("HUMANITIX_API_KEY") or None,
-        base_url=os.environ.get("HUMANITIX_BASE_URL") or None,
-    )
+    """Create a lazily initialized client manager for one stdio connection."""
+    load_server_config()
+    client = _ConnectionClient()
     try:
         yield {"client": client}
     finally:
@@ -67,7 +113,13 @@ async def app_lifespan(server: Server) -> AsyncIterator[dict[str, Any]]:
 
 def _get_client(ctx: Any) -> HumanitixClient:
     """Return the lifespan-managed client from a request context."""
-    return ctx.request_context.lifespan_context["client"]
+    lifespan_context = getattr(ctx, "lifespan_context", None)
+    if lifespan_context is None:
+        lifespan_context = ctx.request_context.lifespan_context
+    client = lifespan_context["client"]
+    if isinstance(client, _ConnectionClient):
+        return client.get()
+    return client
 
 
 def _error_response(message: str, *, status_code: int | None = None) -> dict[str, Any]:
@@ -150,6 +202,12 @@ def _validate_pagination(args: dict[str, Any]) -> tuple[int, int]:
     return page_size, max_items
 
 
+def _override_location_params(args: dict[str, Any]) -> dict[str, Any]:
+    """Return the optional documented location-override query parameter."""
+    override_location = args.get("override_location")
+    return {"overrideLocation": override_location} if override_location is not None else {}
+
+
 def _format_result(data: Any, *, raw: bool = False) -> dict[str, Any]:
     """Format a model or list of models using Phase 3 helpers.
 
@@ -188,8 +246,9 @@ _TOOLS: list[Tool] = [
             "List Humanitix events accessible to the configured API key. "
             "Returns trimmed event summaries by default; set raw=true to receive "
             "the full Humanitix payload. Results are paginated and capped at "
-            "max_items (default 500). Use in_future_only=true to hide past events, "
-            "or provide an ISO date string via since to filter by start date."
+            "max_items (default 500). Use in_future_only=true to retrieve only "
+            "events whose end date is in the future, or provide an ISO 8601 "
+            "datetime via since."
         ),
         {
             "type": "object",
@@ -206,12 +265,16 @@ _TOOLS: list[Tool] = [
                 },
                 "in_future_only": {
                     "type": "boolean",
-                    "description": "Only return events that start in the future.",
+                    "description": "Only return events whose end date is in the future.",
                     "default": False,
                 },
                 "since": {
                     "type": "string",
-                    "description": "ISO date/datetime string; only return events starting on or after this value.",
+                    "description": "ISO 8601 datetime; return results since this time.",
+                },
+                "override_location": {
+                    "type": "string",
+                    "description": "ISO 3166-1 alpha-2 country code to override the account location.",
                 },
                 "raw": {
                     "type": "boolean",
@@ -234,6 +297,10 @@ _TOOLS: list[Tool] = [
                 "event_id": {
                     "type": "string",
                     "description": "Humanitix event identifier.",
+                },
+                "override_location": {
+                    "type": "string",
+                    "description": "ISO 3166-1 alpha-2 country code to override the account location.",
                 },
                 "raw": {
                     "type": "boolean",
@@ -258,6 +325,10 @@ _TOOLS: list[Tool] = [
                     "type": "string",
                     "description": "Humanitix event identifier.",
                 },
+                "override_location": {
+                    "type": "string",
+                    "description": "ISO 3166-1 alpha-2 country code to override the account location.",
+                },
                 "raw": {
                     "type": "boolean",
                     "description": "Return the raw event payload instead of the date projection.",
@@ -269,17 +340,30 @@ _TOOLS: list[Tool] = [
     _tool(
         "humanitix_list_orders",
         (
-            "List orders for a specific Humanitix event date. "
-            "The event_date_id is required; obtain it from humanitix_list_event_dates. "
+            "List orders for a specific Humanitix event and event date. "
+            "The event_id identifies the event; event_date_id identifies its specific "
+            "date and can be obtained from humanitix_list_event_dates. "
             "Returns trimmed orders by default; set raw=true for full payloads."
         ),
         {
             "type": "object",
-            "required": ["event_date_id"],
+            "required": ["event_id", "event_date_id"],
             "properties": {
+                "event_id": {
+                    "type": "string",
+                    "description": "Humanitix event identifier that owns the order.",
+                },
                 "event_date_id": {
                     "type": "string",
                     "description": "Humanitix event-date identifier.",
+                },
+                "since": {
+                    "type": "string",
+                    "description": "ISO 8601 datetime; return results since this time.",
+                },
+                "override_location": {
+                    "type": "string",
+                    "description": "ISO 3166-1 alpha-2 country code to override the account location.",
                 },
                 "page_size": {
                     "type": "integer",
@@ -302,16 +386,24 @@ _TOOLS: list[Tool] = [
     _tool(
         "humanitix_get_order",
         (
-            "Fetch a single order by its order identifier. "
+            "Fetch a single order by its event identifier and order identifier. "
             "Returns a trimmed order by default; set raw=true for the full payload."
         ),
         {
             "type": "object",
-            "required": ["order_id"],
+            "required": ["event_id", "order_id"],
             "properties": {
+                "event_id": {
+                    "type": "string",
+                    "description": "Humanitix event identifier that owns the order.",
+                },
                 "order_id": {
                     "type": "string",
-                    "description": "Humanitix order identifier.",
+                    "description": "Humanitix order identifier within the event.",
+                },
+                "override_location": {
+                    "type": "string",
+                    "description": "ISO 3166-1 alpha-2 country code to override the account location.",
                 },
                 "raw": {
                     "type": "boolean",
@@ -324,15 +416,20 @@ _TOOLS: list[Tool] = [
     _tool(
         "humanitix_list_tickets",
         (
-            "List tickets for a specific Humanitix event date. "
-            "The event_date_id is required; obtain it from humanitix_list_event_dates. "
+            "List tickets for a specific Humanitix event and event date. "
+            "The event_id identifies the event; event_date_id identifies its specific "
+            "date and can be obtained from humanitix_list_event_dates. "
             "Optionally filter by ticket status. Returns trimmed tickets by default; "
             "set raw=true for full payloads."
         ),
         {
             "type": "object",
-            "required": ["event_date_id"],
+            "required": ["event_id", "event_date_id"],
             "properties": {
+                "event_id": {
+                    "type": "string",
+                    "description": "Humanitix event identifier that owns the tickets.",
+                },
                 "event_date_id": {
                     "type": "string",
                     "description": "Humanitix event-date identifier.",
@@ -340,6 +437,14 @@ _TOOLS: list[Tool] = [
                 "status": {
                     "type": "string",
                     "description": "Optional status filter (e.g. 'complete' or 'cancelled').",
+                },
+                "since": {
+                    "type": "string",
+                    "description": "ISO 8601 datetime; return results since this time.",
+                },
+                "override_location": {
+                    "type": "string",
+                    "description": "ISO 3166-1 alpha-2 country code to override the account location.",
                 },
                 "page_size": {
                     "type": "integer",
@@ -362,16 +467,24 @@ _TOOLS: list[Tool] = [
     _tool(
         "humanitix_get_ticket",
         (
-            "Fetch a single ticket by its ticket identifier. "
+            "Fetch a single ticket by its event identifier and ticket identifier. "
             "Returns a trimmed ticket by default; set raw=true for the full payload."
         ),
         {
             "type": "object",
-            "required": ["ticket_id"],
+            "required": ["event_id", "ticket_id"],
             "properties": {
+                "event_id": {
+                    "type": "string",
+                    "description": "Humanitix event identifier that owns the ticket.",
+                },
                 "ticket_id": {
                     "type": "string",
-                    "description": "Humanitix ticket identifier.",
+                    "description": "Humanitix ticket identifier within the event.",
+                },
+                "override_location": {
+                    "type": "string",
+                    "description": "ISO 3166-1 alpha-2 country code to override the account location.",
                 },
                 "raw": {
                     "type": "boolean",
@@ -384,15 +497,20 @@ _TOOLS: list[Tool] = [
     _tool(
         "humanitix_get_check_in_count",
         (
-            "Get check-in totals for a Humanitix event date. "
-            "The event_date_id is required; obtain it from humanitix_list_event_dates. "
+            "Get check-in totals for a Humanitix event and event date. "
+            "The event_id identifies the event; event_date_id identifies its specific "
+            "date and can be obtained from humanitix_list_event_dates. "
             "Warning: the /check-in-count endpoint is BETA and its response shape may change. "
             "Returns trimmed counts by default; set raw=true for the full payload."
         ),
         {
             "type": "object",
-            "required": ["event_date_id"],
+            "required": ["event_id", "event_date_id"],
             "properties": {
+                "event_id": {
+                    "type": "string",
+                    "description": "Humanitix event identifier for the check-in count.",
+                },
                 "event_date_id": {
                     "type": "string",
                     "description": "Humanitix event-date identifier.",
@@ -408,18 +526,27 @@ _TOOLS: list[Tool] = [
     _tool(
         "humanitix_sales_summary",
         (
-            "Build a sales summary for a Humanitix event date by aggregating tickets. "
+            "Build a sales summary for a Humanitix event and event date by aggregating tickets. "
             "Reports sold/complete counts, cancelled counts, gross revenue (when price data "
             "is available), and capacity utilisation (when a trustworthy capacity value is "
-            "present). The event_date_id is required; obtain it from humanitix_list_event_dates."
+            "present). The event_id identifies the event; event_date_id identifies its specific "
+            "date and can be obtained from humanitix_list_event_dates."
         ),
         {
             "type": "object",
-            "required": ["event_date_id"],
+            "required": ["event_id", "event_date_id"],
             "properties": {
+                "event_id": {
+                    "type": "string",
+                    "description": "Humanitix event identifier that owns the tickets.",
+                },
                 "event_date_id": {
                     "type": "string",
                     "description": "Humanitix event-date identifier.",
+                },
+                "override_location": {
+                    "type": "string",
+                    "description": "ISO 3166-1 alpha-2 country code to override the account location.",
                 },
                 "max_items": {
                     "type": "integer",
@@ -447,7 +574,9 @@ async def _list_events(client: HumanitixClient, args: dict[str, Any]) -> dict[st
     in_future_only = bool(args.get("in_future_only", False))
     since = args.get("since")
 
-    params: dict[str, Any] = {}
+    params = _override_location_params(args)
+    if in_future_only:
+        params["inFutureOnly"] = True
     if since is not None:
         params["since"] = since
 
@@ -455,15 +584,12 @@ async def _list_events(client: HumanitixClient, args: dict[str, Any]) -> dict[st
         Event.model_validate(item)
         async for item in client.paginate(
             "/v1/events",
+            result_key="events",
             params=params,
             page_size=page_size,
             max_items=max_items,
         )
     ]
-
-    if in_future_only:
-        now = datetime.now(timezone.utc)
-        items = [e for e in items if e.start_date is not None and e.start_date >= now]
 
     return _format_result(items, raw=raw)
 
@@ -471,7 +597,10 @@ async def _list_events(client: HumanitixClient, args: dict[str, Any]) -> dict[st
 async def _get_event(client: HumanitixClient, args: dict[str, Any]) -> dict[str, Any]:
     event_id = _validate_identifier("event_id", args.get("event_id"))
     raw = bool(args.get("raw", False))
-    data = await client.get(f"/v1/events/{event_id}")
+    data = await client.get(
+        f"/v1/events/{event_id}",
+        params=_override_location_params(args),
+    )
     return _format_result(Event.model_validate(data), raw=raw)
 
 
@@ -481,7 +610,10 @@ async def _list_event_dates(
 ) -> dict[str, Any]:
     event_id = _validate_identifier("event_id", args.get("event_id"))
     raw = bool(args.get("raw", False))
-    data = await client.get(f"/v1/events/{event_id}")
+    data = await client.get(
+        f"/v1/events/{event_id}",
+        params=_override_location_params(args),
+    )
     event = Event.model_validate(data)
 
     if raw:
@@ -504,14 +636,23 @@ async def _list_event_dates(
 
 
 async def _list_orders(client: HumanitixClient, args: dict[str, Any]) -> dict[str, Any]:
+    event_id = _validate_identifier("event_id", args.get("event_id"))
     event_date_id = _validate_identifier("event_date_id", args.get("event_date_id"))
     page_size, max_items = _validate_pagination(args)
     raw = bool(args.get("raw", False))
+    since = args.get("since")
+
+    params = _override_location_params(args)
+    params["eventDateId"] = event_date_id
+    if since is not None:
+        params["since"] = since
 
     items = [
         Order.model_validate(item)
         async for item in client.paginate(
-            f"/v1/event-dates/{event_date_id}/orders",
+            f"/v1/events/{event_id}/orders",
+            result_key="orders",
+            params=params,
             page_size=page_size,
             max_items=max_items,
         )
@@ -520,26 +661,36 @@ async def _list_orders(client: HumanitixClient, args: dict[str, Any]) -> dict[st
 
 
 async def _get_order(client: HumanitixClient, args: dict[str, Any]) -> dict[str, Any]:
+    event_id = _validate_identifier("event_id", args.get("event_id"))
     order_id = _validate_identifier("order_id", args.get("order_id"))
     raw = bool(args.get("raw", False))
-    data = await client.get(f"/v1/orders/{order_id}")
+    data = await client.get(
+        f"/v1/events/{event_id}/orders/{order_id}",
+        params=_override_location_params(args),
+    )
     return _format_result(Order.model_validate(data), raw=raw)
 
 
 async def _list_tickets(client: HumanitixClient, args: dict[str, Any]) -> dict[str, Any]:
+    event_id = _validate_identifier("event_id", args.get("event_id"))
     event_date_id = _validate_identifier("event_date_id", args.get("event_date_id"))
     page_size, max_items = _validate_pagination(args)
     raw = bool(args.get("raw", False))
     status = args.get("status")
+    since = args.get("since")
 
-    params: dict[str, Any] = {}
+    params = _override_location_params(args)
+    params["eventDateId"] = event_date_id
     if status is not None:
         params["status"] = status
+    if since is not None:
+        params["since"] = since
 
     items = [
         Ticket.model_validate(item)
         async for item in client.paginate(
-            f"/v1/event-dates/{event_date_id}/tickets",
+            f"/v1/events/{event_id}/tickets",
+            result_key="tickets",
             params=params,
             page_size=page_size,
             max_items=max_items,
@@ -549,9 +700,13 @@ async def _list_tickets(client: HumanitixClient, args: dict[str, Any]) -> dict[s
 
 
 async def _get_ticket(client: HumanitixClient, args: dict[str, Any]) -> dict[str, Any]:
+    event_id = _validate_identifier("event_id", args.get("event_id"))
     ticket_id = _validate_identifier("ticket_id", args.get("ticket_id"))
     raw = bool(args.get("raw", False))
-    data = await client.get(f"/v1/tickets/{ticket_id}")
+    data = await client.get(
+        f"/v1/events/{event_id}/tickets/{ticket_id}",
+        params=_override_location_params(args),
+    )
     return _format_result(Ticket.model_validate(data), raw=raw)
 
 
@@ -559,9 +714,13 @@ async def _get_check_in_count(
     client: HumanitixClient,
     args: dict[str, Any],
 ) -> dict[str, Any]:
+    event_id = _validate_identifier("event_id", args.get("event_id"))
     event_date_id = _validate_identifier("event_date_id", args.get("event_date_id"))
     raw = bool(args.get("raw", False))
-    data = await client.get(f"/v1/event-dates/{event_date_id}/check-in-count")
+    data = await client.get(
+        f"/v1/events/{event_id}/check-in-count",
+        params={"eventDateId": event_date_id},
+    )
     return _format_result(CheckInCount.model_validate(data), raw=raw)
 
 
@@ -596,6 +755,7 @@ def _is_cancelled_status(status: str | None) -> bool:
 
 
 async def _sales_summary(client: HumanitixClient, args: dict[str, Any]) -> dict[str, Any]:
+    event_id = _validate_identifier("event_id", args.get("event_id"))
     event_date_id = _validate_identifier("event_date_id", args.get("event_date_id"))
     max_items = int(args.get("max_items", DEFAULT_MAX_ITEMS))
     raw = bool(args.get("raw", False))
@@ -603,10 +763,15 @@ async def _sales_summary(client: HumanitixClient, args: dict[str, Any]) -> dict[
     if max_items < 1:
         raise _ValidationFailure("max_items must be at least 1.")
 
+    params = _override_location_params(args)
+    params["eventDateId"] = event_date_id
+
     tickets = [
         Ticket.model_validate(item)
         async for item in client.paginate(
-            f"/v1/event-dates/{event_date_id}/tickets",
+            f"/v1/events/{event_id}/tickets",
+            result_key="tickets",
+            params=params,
             page_size=DEFAULT_PAGE_SIZE,
             max_items=max_items,
         )
@@ -647,8 +812,8 @@ async def _sales_summary(client: HumanitixClient, args: dict[str, Any]) -> dict[
     total_cancelled = 0
     total_revenue = 0.0
     revenue_available = False
-    overall_capacity_available = False
-    overall_capacity: int | None = None
+    overall_capacity_available = bool(groups)
+    overall_capacity = 0
 
     for (ticket_type_id, ticket_type_name), group in sorted(groups.items()):
         entry: dict[str, Any] = {
@@ -670,11 +835,10 @@ async def _sales_summary(client: HumanitixClient, args: dict[str, Any]) -> dict[
                 (group["sold"] / group["capacity"]) * 100, 2
             )
             entry["capacityAvailable"] = True
-            if not overall_capacity_available:
-                overall_capacity = group["capacity"]
-                overall_capacity_available = True
+            overall_capacity += group["capacity"]
         else:
             entry["capacityAvailable"] = False
+            overall_capacity_available = False
 
         total_sold += group["sold"]
         total_cancelled += group["cancelled"]
@@ -724,8 +888,15 @@ _TOOL_HANDLERS: dict[str, Any] = {
 }
 
 
-async def on_list_tools() -> dict[str, Any]:
-    return {"tools": _TOOLS}
+async def on_list_tools(
+    _ctx: Any = None,
+    _params: Any = None,
+) -> dict[str, Any]:
+    return {
+        "tools": [
+            tool.model_dump(by_alias=True, exclude_none=True) for tool in _TOOLS
+        ]
+    }
 
 
 async def on_call_tool(
@@ -741,9 +912,15 @@ async def on_call_tool(
             content=[TextContent(type="text", text=json.dumps(_error_response(f"Unknown tool: {name}")))],
         )
 
-    client = _get_client(ctx)
-    handler = _TOOL_HANDLERS[name]
+    try:
+        client = _get_client(ctx)
+    except ConfigurationError as exc:
+        return CallToolResult(
+            isError=True,
+            content=[TextContent(type="text", text=json.dumps(_handle_error(exc)))],
+        )
 
+    handler = _TOOL_HANDLERS[name]
     try:
         result = await handler(client, arguments)
     except Exception as exc:

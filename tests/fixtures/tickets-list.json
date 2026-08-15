@@ -1,0 +1,25 @@
+{
+  "tickets": [
+    {
+      "_id": "REDACTED_TICKET_ID",
+      "eventId": "615270c8730a430b4cc5d28a",
+      "orderId": "REDACTED_ORDER_ID",
+      "ticketTypeId": "REDACTED_TICKET_TYPE_ID",
+      "ticketTypeName": "REDACTED_TICKET_TYPE",
+      "status": "complete",
+      "eventDateId": "615270c8730a430b4cc5d293",
+      "currency": "NZD",
+      "discount": 0,
+      "netPrice": 0,
+      "taxes": 0,
+      "fee": 0,
+      "salesChannel": "REDACTED_SALES_CHANNEL",
+      "location": "NZ",
+      "createdAt": "2000-01-01T00:00:00.000Z",
+      "updatedAt": "2000-01-01T00:00:00.000Z"
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "pageSize": 1
+}

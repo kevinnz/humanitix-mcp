@@ -33,7 +33,7 @@ def _client(env_key: str | None = None) -> HumanitixClient:
 @respx.mock
 async def test_sends_api_key_header() -> None:
     route = respx.get(f"{DEFAULT_BASE_URL}/v1/events").mock(
-        return_value=httpx.Response(200, json={"items": [], "total": 0}),
+        return_value=httpx.Response(200, json={"events": [], "total": 0}),
     )
     client = _client()
     await client.get("/v1/events")
@@ -76,12 +76,12 @@ async def test_retry_on_500_then_success() -> None:
         side_effect=[
             httpx.Response(500, text="boom"),
             httpx.Response(500, text="boom"),
-            httpx.Response(200, json={"items": [], "total": 0}),
+            httpx.Response(200, json={"events": [], "total": 0}),
         ],
     )
     client = _client()
     result = await client.get("/v1/events")
-    assert result == {"items": [], "total": 0}
+    assert result == {"events": [], "total": 0}
     assert route.call_count == 3
     await client.close()
 
@@ -189,24 +189,26 @@ async def test_pagination_yields_all_pages() -> None:
     page1 = respx.get(f"{DEFAULT_BASE_URL}/v1/events", params={"page": 1, "pageSize": 2}).mock(
         return_value=httpx.Response(
             200,
-            json={"items": [{"id": "1"}, {"id": "2"}], "total": 5},
+            json={"events": [{"id": "1"}, {"id": "2"}], "total": 5},
         ),
     )
     page2 = respx.get(f"{DEFAULT_BASE_URL}/v1/events", params={"page": 2, "pageSize": 2}).mock(
         return_value=httpx.Response(
             200,
-            json={"items": [{"id": "3"}, {"id": "4"}], "total": 5},
+            json={"events": [{"id": "3"}, {"id": "4"}], "total": 5},
         ),
     )
     page3 = respx.get(f"{DEFAULT_BASE_URL}/v1/events", params={"page": 3, "pageSize": 2}).mock(
         return_value=httpx.Response(
             200,
-            json={"items": [{"id": "5"}], "total": 5},
+            json={"events": [{"id": "5"}], "total": 5},
         ),
     )
 
     client = _client()
-    items = [item async for item in client.paginate("/v1/events", page_size=2)]
+    items = [
+        item async for item in client.paginate("/v1/events", result_key="events", page_size=2)
+    ]
     assert [item["id"] for item in items] == ["1", "2", "3", "4", "5"]
     assert page1.called
     assert page2.called
@@ -215,15 +217,90 @@ async def test_pagination_yields_all_pages() -> None:
 
 
 @respx.mock
+async def test_pagination_reads_orders_collection_key() -> None:
+    path = f"{DEFAULT_BASE_URL}/v1/events/evt_123/orders"
+    page1 = respx.get(
+        path,
+        params={"eventDateId": "ed_111", "page": 1, "pageSize": 1},
+    ).mock(
+        return_value=httpx.Response(
+            200,
+            json={"orders": [{"id": "ord_1"}], "total": 2},
+        ),
+    )
+    page2 = respx.get(
+        path,
+        params={"eventDateId": "ed_111", "page": 2, "pageSize": 1},
+    ).mock(
+        return_value=httpx.Response(
+            200,
+            json={"orders": [{"id": "ord_2"}], "total": 2},
+        ),
+    )
+
+    client = _client()
+    orders = [
+        item
+        async for item in client.paginate(
+            "/v1/events/evt_123/orders",
+            result_key="orders",
+            params={"eventDateId": "ed_111"},
+            page_size=1,
+        )
+    ]
+
+    assert [order["id"] for order in orders] == ["ord_1", "ord_2"]
+    assert page1.called
+    assert page2.called
+    await client.close()
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    ("result_key", "response"),
+    [
+        ("events", {"total": 0}),
+        ("tickets", {"tickets": {"id": "tkt_1"}, "total": 1}),
+    ],
+)
+async def test_pagination_rejects_invalid_collection_envelopes(
+    result_key: str,
+    response: dict[str, object],
+) -> None:
+    respx.get(
+        f"{DEFAULT_BASE_URL}/v1/events/evt_123/tickets",
+        params={"page": 1, "pageSize": 100},
+    ).mock(return_value=httpx.Response(200, json=response))
+
+    client = _client()
+    expected = "missing the required" if result_key == "events" else "non-list"
+    with pytest.raises(ValidationError, match=expected):
+        async for _ in client.paginate(
+            "/v1/events/evt_123/tickets",
+            result_key=result_key,
+        ):
+            pass
+    await client.close()
+
+
+@respx.mock
 async def test_pagination_max_items_cap() -> None:
     respx.get(f"{DEFAULT_BASE_URL}/v1/events", params={"page": 1, "pageSize": 3}).mock(
         return_value=httpx.Response(
             200,
-            json={"items": [{"id": "1"}, {"id": "2"}, {"id": "3"}], "total": 10},
+            json={"events": [{"id": "1"}, {"id": "2"}, {"id": "3"}], "total": 10},
         ),
     )
     client = _client()
-    items = [item async for item in client.paginate("/v1/events", page_size=3, max_items=2)]
+    items = [
+        item
+        async for item in client.paginate(
+            "/v1/events",
+            result_key="events",
+            page_size=3,
+            max_items=2,
+        )
+    ]
     assert [item["id"] for item in items] == ["1", "2"]
     await client.close()
 
@@ -233,11 +310,11 @@ async def test_pagination_default_max_items_500() -> None:
     respx.get(f"{DEFAULT_BASE_URL}/v1/events", params={"page": 1, "pageSize": 100}).mock(
         return_value=httpx.Response(
             200,
-            json={"items": [{"id": str(i)} for i in range(501)], "total": 1000},
+            json={"events": [{"id": str(i)} for i in range(501)], "total": 1000},
         ),
     )
     client = _client()
-    items = [item async for item in client.paginate("/v1/events")]
+    items = [item async for item in client.paginate("/v1/events", result_key="events")]
     assert len(items) == 500
     await client.close()
 
@@ -254,18 +331,26 @@ async def test_pagination_throttle_between_requests(monkeypatch: pytest.MonkeyPa
     respx.get(f"{DEFAULT_BASE_URL}/v1/events", params={"page": 1, "pageSize": 1}).mock(
         return_value=httpx.Response(
             200,
-            json={"items": [{"id": "1"}], "total": 2},
+            json={"events": [{"id": "1"}], "total": 2},
         ),
     )
     respx.get(f"{DEFAULT_BASE_URL}/v1/events", params={"page": 2, "pageSize": 1}).mock(
         return_value=httpx.Response(
             200,
-            json={"items": [{"id": "2"}], "total": 2},
+            json={"events": [{"id": "2"}], "total": 2},
         ),
     )
 
     client = _client()
-    items = [item async for item in client.paginate("/v1/events", page_size=1, max_items=2)]
+    items = [
+        item
+        async for item in client.paginate(
+            "/v1/events",
+            result_key="events",
+            page_size=1,
+            max_items=2,
+        )
+    ]
     assert len(items) == 2
     assert len(sleeps) == 1
     assert sleeps[0] == pytest.approx(0.25, abs=0.01)
@@ -276,7 +361,7 @@ async def test_pagination_throttle_between_requests(monkeypatch: pytest.MonkeyPa
 async def test_pagination_invalid_page_size() -> None:
     client = _client()
     with pytest.raises(ValidationError, match="page_size must be between 1 and 100"):
-        async for _ in client.paginate("/v1/events", page_size=101):
+        async for _ in client.paginate("/v1/events", result_key="events", page_size=101):
             pass
     await client.close()
 
@@ -284,7 +369,7 @@ async def test_pagination_invalid_page_size() -> None:
 @respx.mock
 async def test_context_manager_closes_client() -> None:
     respx.get(f"{DEFAULT_BASE_URL}/v1/events").mock(
-        return_value=httpx.Response(200, json={"items": [], "total": 0}),
+        return_value=httpx.Response(200, json={"events": [], "total": 0}),
     )
     async with HumanitixClient(api_key=FAKE_API_KEY) as client:
         await client.get("/v1/events")

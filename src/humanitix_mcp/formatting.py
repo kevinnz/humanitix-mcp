@@ -1,10 +1,4 @@
-"""Deterministic response trimming helpers for MCP tool outputs (Phase 3).
-
-.. warning::
-    The ``/check-in-count`` endpoint is BETA and its response shape may change
-    without notice. Trimmed check-in output is provided verbatim because the
-    exact field names are still unstable.
-"""
+"""Deterministic response trimming helpers for MCP tool outputs (Phase 3)."""
 
 from __future__ import annotations
 
@@ -15,6 +9,8 @@ from humanitix_mcp.models import (
     CheckInCountEntry,
     Event,
     EventDate,
+    EventLocation,
+    Location,
     Order,
     Ticket,
     TicketTypeBreakdown,
@@ -24,23 +20,33 @@ from humanitix_mcp.models import (
 def _venue_or_location(event: Event) -> dict[str, Any]:
     """Return a consistent venue dict from either ``location.venue`` or ``venue``."""
     venue = None
-    if event.location and event.location.venue:
+    if isinstance(event.location, Location) and event.location.venue:
         venue = event.location.venue
     elif event.venue:
         venue = event.venue
 
-    if venue is None:
-        return {}
-
     result: dict[str, Any] = {}
-    if venue.name is not None:
-        result["name"] = venue.name
-    if venue.address is not None:
-        result["address"] = venue.address
-    if venue.city is not None:
-        result["city"] = venue.city
-    if venue.country is not None:
-        result["country"] = venue.country
+    if venue is not None:
+        if venue.name is not None:
+            result["name"] = venue.name
+        if venue.address is not None:
+            result["address"] = venue.address
+        if venue.city is not None:
+            result["city"] = venue.city
+        if venue.country is not None:
+            result["country"] = venue.country
+        return result
+
+    event_location: EventLocation | None = event.event_location
+    if event_location is not None:
+        if event_location.venue_name is not None:
+            result["name"] = event_location.venue_name
+        if event_location.address is not None:
+            result["address"] = event_location.address
+        if event_location.city is not None:
+            result["city"] = event_location.city
+        if event_location.country is not None:
+            result["country"] = event_location.country
     return result
 
 
@@ -56,7 +62,7 @@ def _format_event_date(date: EventDate) -> dict[str, Any]:
 def format_event(event: Event, *, raw: bool = False) -> dict[str, Any]:
     """Return a trimmed event dictionary."""
     if raw:
-        return event.model_dump(by_alias=True, exclude_none=False)
+        return event.model_dump(mode="json", by_alias=True, exclude_none=False)
 
     result: dict[str, Any] = {
         "id": event.id,
@@ -101,7 +107,7 @@ def _format_ticket_type_breakdown(tt: TicketTypeBreakdown) -> dict[str, Any]:
 def format_order(order: Order, *, raw: bool = False) -> dict[str, Any]:
     """Return a trimmed order dictionary without payment processor internals."""
     if raw:
-        return order.model_dump(by_alias=True, exclude_none=False)
+        return order.model_dump(mode="json", by_alias=True, exclude_none=False)
 
     result: dict[str, Any] = {
         "id": order.id,
@@ -155,7 +161,7 @@ def _format_additional_answers(ticket: Ticket) -> list[dict[str, Any]]:
 def format_ticket(ticket: Ticket, *, raw: bool = False) -> dict[str, Any]:
     """Return a trimmed ticket dictionary."""
     if raw:
-        return ticket.model_dump(by_alias=True, exclude_none=False)
+        return ticket.model_dump(mode="json", by_alias=True, exclude_none=False)
 
     return {
         "id": ticket.id,
@@ -173,21 +179,17 @@ def _format_check_in_entry(entry: CheckInCountEntry) -> dict[str, Any]:
         "ticketTypeId": entry.ticket_type_id,
         "ticketTypeName": entry.ticket_type_name,
         "checkedIn": entry.checked_in,
-        "sold": entry.sold,
     }
 
 
 def format_check_in_count(count: CheckInCount, *, raw: bool = False) -> dict[str, Any]:
-    """Return a check-in count dictionary.
-
-    The BETA check-in-count endpoint is treated as verbatim because its shape
-    may change without notice.
-    """
+    """Return a stable check-in count dictionary."""
     if raw:
-        return count.model_dump(by_alias=True, exclude_none=False)
+        return count.model_dump(mode="json", by_alias=True, exclude_none=False)
 
     return {
-        "totalCheckedIn": count.total_checked_in,
-        "totalSold": count.total_sold,
-        "byTicketType": [_format_check_in_entry(e) for e in count.by_ticket_type],
+        "eventId": count.event_id,
+        "eventDateId": count.event_date_id,
+        "checkedIn": count.checked_in,
+        "ticketTypes": [_format_check_in_entry(e) for e in count.ticket_types],
     }

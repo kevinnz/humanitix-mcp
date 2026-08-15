@@ -32,119 +32,160 @@ def test_format_event_retains_expected_fields() -> None:
     event = Event.model_validate(load_fixture("event.json"))
     trimmed = format_event(event)
 
-    assert trimmed["id"] == "evt_12345"
+    assert trimmed["id"] == "PUBLIC_CHCON_EVENT_ID"
     assert trimmed["name"] == "CHCon 2026"
     assert trimmed["slug"] == "chcon-2026"
     assert trimmed["timezone"] == "Pacific/Auckland"
     assert trimmed["published"] is True
-    assert trimmed["venue"] == {
-        "name": "Christchurch Town Hall",
-        "address": "86 Kilmore Street",
-        "city": "Christchurch",
-        "country": "New Zealand",
-    }
-    assert len(trimmed["eventDates"]) == 2
-    assert trimmed["eventDates"][0]["id"] == "ed_111"
-    assert "description" not in trimmed
-    assert "internalField" not in trimmed
+    assert trimmed["venue"] == {}
+    assert len(trimmed["eventDates"]) == 1
+    assert trimmed["eventDates"][0]["id"] == "PUBLIC_CHCON_EVENT_DATE_ID"
+    assert "unmodeledSafeField" not in trimmed
 
 
 def test_format_event_omits_payment_internal_fields() -> None:
     event = Event.model_validate(load_fixture("event.json"))
     trimmed = format_event(event)
-    assert "internalField" not in trimmed
+    assert "unmodeledSafeField" not in trimmed
     assert "latitude" not in trimmed.get("venue", {})
 
 
 def test_format_event_raw_escape_hatch() -> None:
     event = Event.model_validate(load_fixture("event.json"))
     raw = format_event(event, raw=True)
-    assert raw["internalField"] == "should be ignored"
-    assert "description" in raw
+    assert raw["unmodeledSafeField"] == "redacted"
+
+
+def test_format_event_handles_documented_live_location_variants() -> None:
+    event = Event.model_validate(
+        {
+            "_id": "SYNTHETIC_EVENT_ID",
+            "location": "NZ",
+            "eventLocation": {
+                "venueName": "Redacted venue",
+                "city": "Redacted city",
+                "country": "NZ",
+            },
+            "dates": [{"_id": "SYNTHETIC_EVENT_DATE_ID"}],
+        },
+    )
+
+    assert format_event(event) == {
+        "id": "SYNTHETIC_EVENT_ID",
+        "name": None,
+        "slug": None,
+        "startDate": None,
+        "endDate": None,
+        "timezone": None,
+        "published": None,
+        "status": None,
+        "venue": {
+            "name": "Redacted venue",
+            "city": "Redacted city",
+            "country": "NZ",
+        },
+        "eventDates": [
+            {
+                "id": "SYNTHETIC_EVENT_DATE_ID",
+                "name": None,
+                "startDate": None,
+                "endDate": None,
+            },
+        ],
+    }
 
 
 def test_format_order_retains_expected_fields() -> None:
     order = Order.model_validate(load_fixture("order.json"))
     trimmed = format_order(order)
 
-    assert trimmed["id"] == "ord_98765"
-    assert trimmed["orderNumber"] == "CHC-2026-0001"
+    assert trimmed["id"] == "REDACTED_ORDER_ID"
+    assert trimmed["orderNumber"] is None
     assert trimmed["status"] == "complete"
     assert trimmed["currency"] == "NZD"
-    assert trimmed["total"] == 450.0
-    assert trimmed["quantity"] == 3
-    assert trimmed["buyer"] == {
-        "firstName": "Alex",
-        "lastName": "Organiser",
-        "email": "alex@example.com",
-    }
-    assert len(trimmed["ticketTypes"]) == 2
-    assert trimmed["ticketTypes"][0]["ticketTypeName"] == "General Admission"
+    assert trimmed["total"] == 0
+    assert trimmed["quantity"] == 0
+    assert trimmed["buyer"] == {}
+    assert len(trimmed["ticketTypes"]) == 1
+    assert trimmed["ticketTypes"][0]["ticketTypeName"] == "REDACTED_TICKET_TYPE"
 
 
 def test_format_order_omits_payment_internals() -> None:
     order = Order.model_validate(load_fixture("order.json"))
     trimmed = format_order(order)
-    assert "paymentProcessorId" not in trimmed
-    assert "paymentMethod" not in trimmed
-    assert "internalNotes" not in trimmed
+    assert "unmodeledSafeField" not in trimmed
 
 
 def test_format_order_raw_escape_hatch() -> None:
     order = Order.model_validate(load_fixture("order.json"))
     raw = format_order(order, raw=True)
-    assert raw["paymentProcessorId"] == "pi_secret"
-    assert raw["paymentMethod"] == "card"
+    assert raw["unmodeledSafeField"] == "redacted"
 
 
 def test_format_ticket_retains_expected_fields() -> None:
     ticket = Ticket.model_validate(load_fixture("ticket.json"))
     trimmed = format_ticket(ticket)
 
-    assert trimmed["id"] == "tkt_11111"
-    assert trimmed["ticketTypeName"] == "General Admission"
+    assert trimmed["id"] == "REDACTED_TICKET_ID"
+    assert trimmed["ticketTypeName"] == "REDACTED_TICKET_TYPE"
     assert trimmed["status"] == "complete"
     assert trimmed["checkedIn"] is False
-    assert trimmed["attendee"] == {
-        "firstName": "Sam",
-        "lastName": "Attendee",
-        "email": "sam@example.com",
-    }
-    assert trimmed["order"] == {"id": "ord_98765", "orderNumber": "CHC-2026-0001"}
-    assert trimmed["additionalAnswers"] == [
-        {"question": "Dietary requirements", "answer": "Vegetarian"},
-        {"question": "T-shirt size", "answer": "L"},
-    ]
+    assert trimmed["attendee"] == {}
+    assert trimmed["order"] == {}
+    assert trimmed["additionalAnswers"] == []
 
 
 def test_format_ticket_omits_internal_fields() -> None:
     ticket = Ticket.model_validate(load_fixture("ticket.json"))
     trimmed = format_ticket(ticket)
-    assert "barcode" not in trimmed
-    assert "internalField" not in trimmed
+    assert "unmodeledSafeField" not in trimmed
 
 
 def test_format_ticket_raw_escape_hatch() -> None:
     ticket = Ticket.model_validate(load_fixture("ticket.json"))
     raw = format_ticket(ticket, raw=True)
-    assert raw["barcode"] == "secret-barcode"
+    assert raw["unmodeledSafeField"] == "redacted"
 
 
-def test_format_check_in_count_verbatim() -> None:
-    count = CheckInCount.model_validate(load_fixture("check-in-count.json"))
+def test_format_check_in_count_preserves_documented_response() -> None:
+    count = CheckInCount.model_validate(load_fixture("check-in-count-response.json"))
     trimmed = format_check_in_count(count)
 
-    assert trimmed["totalCheckedIn"] == 42
-    assert trimmed["totalSold"] == 300
-    assert len(trimmed["byTicketType"]) == 2
-    assert trimmed["byTicketType"][0]["ticketTypeName"] == "General Admission"
-    assert trimmed["byTicketType"][0]["checkedIn"] == 30
+    assert trimmed == {
+        "eventId": "615270c8730a430b4cc5d28a",
+        "eventDateId": "615270c8730a430b4cc5d293",
+        "checkedIn": 0,
+        "ticketTypes": [
+            {
+                "ticketTypeId": "REDACTED_TICKET_TYPE_ID",
+                "ticketTypeName": "REDACTED_TICKET_TYPE",
+                "checkedIn": 0,
+            },
+        ],
+    }
+
+
+def test_format_check_in_count_normalizes_legacy_aliases() -> None:
+    count = CheckInCount.model_validate(load_fixture("check-in-count.json"))
+
+    assert format_check_in_count(count) == {
+        "eventId": None,
+        "eventDateId": None,
+        "checkedIn": 0,
+        "ticketTypes": [
+            {
+                "ticketTypeId": "REDACTED_TICKET_TYPE_ID",
+                "ticketTypeName": "REDACTED_TICKET_TYPE",
+                "checkedIn": 0,
+            },
+        ],
+    }
 
 
 def test_format_check_in_count_raw_escape_hatch() -> None:
     count = CheckInCount.model_validate(load_fixture("check-in-count.json"))
     raw = format_check_in_count(count, raw=True)
-    assert raw["betaField"] == "may change"
+    assert raw["unmodeledSafeField"] == "redacted"
 
 
 @pytest.mark.parametrize(
@@ -153,7 +194,7 @@ def test_format_check_in_count_raw_escape_hatch() -> None:
         (format_event, Event, "event.json"),
         (format_order, Order, "order.json"),
         (format_ticket, Ticket, "ticket.json"),
-        (format_check_in_count, CheckInCount, "check-in-count.json"),
+        (format_check_in_count, CheckInCount, "check-in-count-response.json"),
     ],
 )
 def test_trimmed_output_has_no_uncontrolled_key_expansion(
@@ -164,5 +205,9 @@ def test_trimmed_output_has_no_uncontrolled_key_expansion(
     instance = model_cls.model_validate(load_fixture(fixture))
     trimmed = formatter(instance)
     raw = formatter(instance, raw=True)
-    assert set(trimmed.keys()) <= set(raw.keys())
+    raw_aliases = {"id": "_id", "eventDates": "dates"}
+    assert all(
+        key in raw or raw_aliases.get(key) in raw
+        for key in trimmed
+    )
     assert len(trimmed) <= len(raw)

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class HumanitixModel(BaseModel):
@@ -35,7 +35,11 @@ class Pagination(HumanitixModel):
 class EventDate(HumanitixModel):
     """A single date within a multi-date event."""
 
-    id: str | None = None
+    id: str | None = Field(
+        default=None,
+        alias="_id",
+        validation_alias=AliasChoices("_id", "id"),
+    )
     name: str | None = None
     start_date: datetime | None = Field(default=None, alias="startDate")
     end_date: datetime | None = Field(default=None, alias="endDate")
@@ -59,6 +63,15 @@ class Location(HumanitixModel):
     longitude: float | None = None
 
 
+class EventLocation(HumanitixModel):
+    """Display location returned by current event responses."""
+
+    venue_name: str | None = Field(default=None, alias="venueName")
+    address: str | None = None
+    city: str | None = None
+    country: str | None = None
+
+
 class EventClassification(HumanitixModel):
     """Event classification metadata."""
 
@@ -70,7 +83,11 @@ class EventClassification(HumanitixModel):
 class Event(HumanitixModel):
     """A Humanitix event."""
 
-    id: str | None = None
+    id: str | None = Field(
+        default=None,
+        alias="_id",
+        validation_alias=AliasChoices("_id", "id"),
+    )
     name: str | None = None
     slug: str | None = None
     description: str | None = None
@@ -79,10 +96,15 @@ class Event(HumanitixModel):
     timezone: str | None = None
     published: bool | None = None
     status: str | None = None
-    location: Location | None = None
+    location: Location | str | None = None
+    event_location: EventLocation | None = Field(default=None, alias="eventLocation")
     venue: Venue | None = None
     classification: EventClassification | None = None
-    event_dates: list[EventDate] = Field(default_factory=list, alias="eventDates")
+    event_dates: list[EventDate] = Field(
+        default_factory=list,
+        alias="dates",
+        validation_alias=AliasChoices("dates", "eventDates"),
+    )
 
 
 class TicketTypeBreakdown(HumanitixModel):
@@ -107,7 +129,11 @@ class Buyer(HumanitixModel):
 class Order(HumanitixModel):
     """A ticket order."""
 
-    id: str | None = None
+    id: str | None = Field(
+        default=None,
+        alias="_id",
+        validation_alias=AliasChoices("_id", "id"),
+    )
     order_number: str | None = Field(default=None, alias="orderNumber")
     status: str | None = None
     created_at: datetime | None = Field(default=None, alias="createdAt")
@@ -147,7 +173,11 @@ class TicketOrderReference(HumanitixModel):
 class Ticket(HumanitixModel):
     """A single ticket / attendee record."""
 
-    id: str | None = None
+    id: str | None = Field(
+        default=None,
+        alias="_id",
+        validation_alias=AliasChoices("_id", "id"),
+    )
     ticket_type_id: str | None = Field(default=None, alias="ticketTypeId")
     ticket_type_name: str | None = Field(default=None, alias="ticketTypeName")
     status: str | None = None
@@ -163,12 +193,11 @@ class Ticket(HumanitixModel):
 
 
 class CheckInCountEntry(HumanitixModel):
-    """Check-in total for a single ticket type."""
+    """Check-in total for a single ticket type returned by the API."""
 
     ticket_type_id: str | None = Field(default=None, alias="ticketTypeId")
     ticket_type_name: str | None = Field(default=None, alias="ticketTypeName")
     checked_in: int | None = Field(default=None, alias="checkedIn")
-    sold: int | None = None
 
 
 class CheckInCount(HumanitixModel):
@@ -179,9 +208,15 @@ class CheckInCount(HumanitixModel):
         change without notice.
     """
 
-    total_checked_in: int | None = Field(default=None, alias="totalCheckedIn")
-    total_sold: int | None = Field(default=None, alias="totalSold")
-    by_ticket_type: list[CheckInCountEntry] = Field(
+    event_id: str | None = Field(default=None, alias="eventId")
+    event_date_id: str | None = Field(default=None, alias="eventDateId")
+    checked_in: int | None = Field(
+        default=None,
+        alias="checkedIn",
+        validation_alias=AliasChoices("checkedIn", "totalCheckedIn"),
+    )
+    ticket_types: list[CheckInCountEntry] = Field(
         default_factory=list,
-        alias="byTicketType",
+        alias="ticketTypes",
+        validation_alias=AliasChoices("ticketTypes", "byTicketType"),
     )

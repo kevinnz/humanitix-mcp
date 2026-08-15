@@ -1,0 +1,12 @@
+{
+  "eventId": "615270c8730a430b4cc5d28a",
+  "eventDateId": "615270c8730a430b4cc5d293",
+  "checkedIn": 0,
+  "ticketTypes": [
+    {
+      "ticketTypeId": "REDACTED_TICKET_TYPE_ID",
+      "ticketTypeName": "REDACTED_TICKET_TYPE",
+      "checkedIn": 0
+    }
+  ]
+}

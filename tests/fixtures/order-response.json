@@ -1,0 +1,13 @@
+{
+  "_id": "REDACTED_ORDER_ID",
+  "eventId": "615270c8730a430b4cc5d28a",
+  "eventDateId": "615270c8730a430b4cc5d293",
+  "status": "complete",
+  "currency": "NZD",
+  "financialStatus": "paid",
+  "manualOrder": false,
+  "salesChannel": "REDACTED_SALES_CHANNEL",
+  "location": "NZ",
+  "createdAt": "2000-01-01T00:00:00.000Z",
+  "updatedAt": "2000-01-01T00:00:00.000Z"
+}

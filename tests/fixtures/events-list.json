@@ -1,0 +1,28 @@
+{
+  "events": [
+    {
+      "_id": "615270c8730a430b4cc5d28a",
+      "name": "REDACTED_EVENT_NAME",
+      "description": "REDACTED",
+      "slug": "redacted-event-slug",
+      "currency": "NZD",
+      "public": false,
+      "timezone": "Pacific/Auckland",
+      "published": false,
+      "totalCapacity": 0,
+      "location": "NZ",
+      "createdAt": "2000-01-01T00:00:00.000Z",
+      "updatedAt": "2000-01-01T00:00:00.000Z",
+      "dates": [
+        {
+          "_id": "615270c8730a430b4cc5d293",
+          "startDate": "2000-01-01T00:00:00.000Z",
+          "endDate": "2000-01-01T00:00:00.000Z"
+        }
+      ]
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "pageSize": 100
+}

@@ -1,19 +1,13 @@
 {
-  "totalCheckedIn": 42,
-  "totalSold": 300,
+  "totalCheckedIn": 0,
+  "totalSold": 0,
   "byTicketType": [
     {
-      "ticketTypeId": "tt_1",
-      "ticketTypeName": "General Admission",
-      "checkedIn": 30,
-      "sold": 200
-    },
-    {
-      "ticketTypeId": "tt_2",
-      "ticketTypeName": "Workshop",
-      "checkedIn": 12,
-      "sold": 100
+      "ticketTypeId": "REDACTED_TICKET_TYPE_ID",
+      "ticketTypeName": "REDACTED_TICKET_TYPE",
+      "checkedIn": 0,
+      "sold": 0
     }
   ],
-  "betaField": "may change"
+  "unmodeledSafeField": "redacted"
 }

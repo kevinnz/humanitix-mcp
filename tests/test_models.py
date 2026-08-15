@@ -27,92 +27,126 @@ def test_event_model_parses_fixture() -> None:
     data = load_fixture("event.json")
     event = Event.model_validate(data)
 
-    assert event.id == "evt_12345"
+    assert event.id == "PUBLIC_CHCON_EVENT_ID"
     assert event.name == "CHCon 2026"
     assert event.slug == "chcon-2026"
     assert event.published is True
     assert event.timezone == "Pacific/Auckland"
-    assert len(event.event_dates) == 2
+    assert len(event.event_dates) == 1
     assert all(isinstance(d, EventDate) for d in event.event_dates)
-    assert event.event_dates[0].id == "ed_111"
-    assert event.location is not None
-    assert event.location.venue is not None
-    assert event.location.venue.name == "Christchurch Town Hall"
+    assert event.event_dates[0].id == "PUBLIC_CHCON_EVENT_DATE_ID"
+    assert event.location is None
 
 
 def test_event_model_retains_unknown_fields_for_raw_escape_hatch() -> None:
     data = load_fixture("event.json")
     event = Event.model_validate(data)
-    assert event.model_dump()["internalField"] == "should be ignored"
+    assert event.model_dump()["unmodeledSafeField"] == "redacted"
+
+
+def test_event_model_accepts_documented_live_identifier_date_and_location_shapes() -> None:
+    event = Event.model_validate(
+        {
+            "_id": "SYNTHETIC_EVENT_ID",
+            "name": "Redacted event",
+            "location": "NZ",
+            "dates": [
+                {
+                    "_id": "SYNTHETIC_EVENT_DATE_ID",
+                    "startDate": "2000-01-01T00:00:00Z",
+                },
+            ],
+            "unmodeledSafeField": "redacted",
+        },
+    )
+
+    assert event.id == "SYNTHETIC_EVENT_ID"
+    assert event.event_dates[0].id == "SYNTHETIC_EVENT_DATE_ID"
+    assert event.location == "NZ"
+    assert event.model_dump(by_alias=True)["unmodeledSafeField"] == "redacted"
 
 
 def test_order_model_parses_fixture() -> None:
     data = load_fixture("order.json")
     order = Order.model_validate(data)
 
-    assert order.id == "ord_98765"
-    assert order.order_number == "CHC-2026-0001"
+    assert order.id == "REDACTED_ORDER_ID"
+    assert order.order_number is None
     assert order.status == "complete"
     assert order.currency == "NZD"
-    assert order.total == 450.0
-    assert order.quantity == 3
-    assert order.buyer is not None
-    assert order.buyer.email == "alex@example.com"
-    assert len(order.ticket_types) == 2
-    assert order.ticket_types[0].ticket_type_name == "General Admission"
-    assert order.ticket_types[0].quantity == 2
+    assert order.total == 0
+    assert order.quantity == 0
+    assert order.buyer is None
+    assert len(order.ticket_types) == 1
+    assert order.ticket_types[0].ticket_type_name == "REDACTED_TICKET_TYPE"
+    assert order.ticket_types[0].quantity == 0
 
 
-def test_order_model_retains_payment_internals_for_raw_escape_hatch() -> None:
+def test_order_model_retains_unknown_fields_for_raw_escape_hatch() -> None:
     data = load_fixture("order.json")
     order = Order.model_validate(data)
     dumped = order.model_dump()
-    assert dumped["paymentProcessorId"] == "pi_secret"
-    assert dumped["paymentMethod"] == "card"
-    assert dumped["internalNotes"] == "do not surface"
+    assert dumped["unmodeledSafeField"] == "redacted"
 
 
 def test_ticket_model_parses_fixture() -> None:
     data = load_fixture("ticket.json")
     ticket = Ticket.model_validate(data)
 
-    assert ticket.id == "tkt_11111"
-    assert ticket.ticket_type_name == "General Admission"
+    assert ticket.id == "REDACTED_TICKET_ID"
+    assert ticket.ticket_type_name == "REDACTED_TICKET_TYPE"
     assert ticket.status == "complete"
     assert ticket.checked_in is False
-    assert ticket.attendee is not None
-    assert ticket.attendee.first_name == "Sam"
-    assert ticket.order is not None
-    assert ticket.order.order_number == "CHC-2026-0001"
-    assert len(ticket.additional_answers) == 2
-    assert ticket.additional_answers[0].question == "Dietary requirements"
-    assert ticket.additional_answers[0].answer == "Vegetarian"
+    assert ticket.attendee is None
+    assert ticket.order is None
+    assert ticket.additional_answers == []
 
 
 def test_ticket_model_retains_internal_fields_for_raw_escape_hatch() -> None:
     data = load_fixture("ticket.json")
     ticket = Ticket.model_validate(data)
     dumped = ticket.model_dump()
-    assert dumped["barcode"] == "secret-barcode"
-    assert dumped["internalField"] == "ignored"
+    assert dumped["unmodeledSafeField"] == "redacted"
 
 
-def test_check_in_count_model_parses_fixture() -> None:
-    data = load_fixture("check-in-count.json")
+def test_check_in_count_model_parses_documented_fixture() -> None:
+    data = load_fixture("check-in-count-response.json")
     count = CheckInCount.model_validate(data)
 
-    assert count.total_checked_in == 42
-    assert count.total_sold == 300
-    assert len(count.by_ticket_type) == 2
-    assert count.by_ticket_type[0].ticket_type_name == "General Admission"
-    assert count.by_ticket_type[0].checked_in == 30
-    assert count.by_ticket_type[0].sold == 200
+    assert count.event_id == "615270c8730a430b4cc5d28a"
+    assert count.event_date_id == "615270c8730a430b4cc5d293"
+    assert count.checked_in == 0
+    assert len(count.ticket_types) == 1
+    assert count.ticket_types[0].ticket_type_name == "REDACTED_TICKET_TYPE"
+    assert count.ticket_types[0].checked_in == 0
 
 
-def test_check_in_count_model_retains_unknown_fields_for_raw_escape_hatch() -> None:
+def test_check_in_count_model_accepts_legacy_aliases_without_overriding_documented_fields() -> None:
     data = load_fixture("check-in-count.json")
+    data.update(
+        {
+            "eventId": "DOCUMENTED_EVENT_ID",
+            "eventDateId": "DOCUMENTED_EVENT_DATE_ID",
+            "checkedIn": 1,
+            "ticketTypes": [
+                {
+                    "ticketTypeId": "DOCUMENTED_TICKET_TYPE_ID",
+                    "ticketTypeName": "Documented ticket type",
+                    "checkedIn": 1,
+                },
+            ],
+        },
+    )
+
     count = CheckInCount.model_validate(data)
-    assert count.model_dump()["betaField"] == "may change"
+
+    assert count.event_id == "DOCUMENTED_EVENT_ID"
+    assert count.event_date_id == "DOCUMENTED_EVENT_DATE_ID"
+    assert count.checked_in == 1
+    assert [entry.ticket_type_id for entry in count.ticket_types] == [
+        "DOCUMENTED_TICKET_TYPE_ID",
+    ]
+    assert count.model_dump()["unmodeledSafeField"] == "redacted"
 
 
 @pytest.mark.parametrize(
@@ -121,7 +155,7 @@ def test_check_in_count_model_retains_unknown_fields_for_raw_escape_hatch() -> N
         (Event, "event.json"),
         (Order, "order.json"),
         (Ticket, "ticket.json"),
-        (CheckInCount, "check-in-count.json"),
+        (CheckInCount, "check-in-count-response.json"),
     ],
 )
 def test_all_models_round_trip(model_cls: type, fixture: str) -> None:

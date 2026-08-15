@@ -234,6 +234,7 @@ class HumanitixClient:
         self,
         path: str,
         *,
+        result_key: str,
         params: dict[str, Any] | None = None,
         page_size: int = 100,
         max_items: int = DEFAULT_MAX_ITEMS,
@@ -241,8 +242,10 @@ class HumanitixClient:
         """Yield items from a page-numbered endpoint.
 
         Requests pages until the API ``total`` is reached or ``max_items`` is
-        met. A small delay is inserted between requests as a conservative
-        client-side throttle pending published Humanitix rate limits.
+        met. ``result_key`` is the endpoint-specific collection key in the
+        response envelope. A small delay is inserted between requests as a
+        conservative client-side throttle pending published Humanitix rate
+        limits.
         """
         if page_size < 1 or page_size > 100:
             raise ValidationError("page_size must be between 1 and 100.")
@@ -258,7 +261,19 @@ class HumanitixClient:
             current_params["page"] = page
             data = await self.get(path, params=current_params)
 
-            items = data.get("items", [])
+            if not isinstance(data, dict) or result_key not in data:
+                raise ValidationError(
+                    f"Successful response from {path} is missing the required "
+                    f"'{result_key}' collection.",
+                )
+
+            items = data[result_key]
+            if not isinstance(items, list):
+                raise ValidationError(
+                    f"Successful response from {path} has a non-list "
+                    f"'{result_key}' collection.",
+                )
+
             total = data.get("total", len(items))
 
             for item in items:

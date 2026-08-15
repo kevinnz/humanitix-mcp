@@ -221,3 +221,6 @@ __marimo__/
 tests/fixtures/*-raw.json
 
 .plan/
+
+# Local implementation plans are intentionally never versioned.
+plan/
